@@ -1,0 +1,1048 @@
+# OpenRail for Android - builds an APK and publishes it to Releases.
+# Put this file at .github/workflows/build-android.yml in its own repo.
+name: Build OpenRail Android
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Write app files
+        run: |
+          mkdir -p app/src/sg/openrail/app app/res/drawable app/assets
+          cat > app/AndroidManifest.xml <<'MANIFEST_EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="sg.openrail.app">
+              <uses-feature android:glEsVersion="0x00030000" android:required="true" />
+              <application
+                  android:label="OpenRail"
+                  android:icon="@drawable/ic_launcher"
+                  android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+                  android:hardwareAccelerated="true"
+                  android:allowBackup="true">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:screenOrientation="sensorLandscape"
+                      android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          MANIFEST_EOF
+          cat > app/res/drawable/ic_launcher.xml <<'ICON_EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+              <path android:fillColor="#E4002B" android:pathData="M0,0h108v108h-108z" />
+              <path android:fillColor="#FFFFFF" android:pathData="M34,26h40a8,8 0 0 1 8,8v34a8,8 0 0 1 -8,8h-40a8,8 0 0 1 -8,-8v-34a8,8 0 0 1 8,-8z" />
+              <path android:fillColor="#1D2A36" android:pathData="M34,34h40v18h-40z" />
+              <path android:fillColor="#00A650" android:pathData="M26,58h56v4h-56z" />
+              <path android:fillColor="#FFFFFF" android:pathData="M36,76l-8,10h8l8,-10zM72,76l8,10h-8l-8,-10z" />
+          </vector>
+          ICON_EOF
+          cat > app/src/sg/openrail/app/MainActivity.java <<'JAVA_EOF'
+          package sg.openrail.app;
+          
+          import android.app.Activity;
+          import android.content.Intent;
+          import android.net.Uri;
+          import android.os.Bundle;
+          import android.view.View;
+          import android.view.WindowManager;
+          import android.webkit.ValueCallback;
+          import android.webkit.WebChromeClient;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          
+          public class MainActivity extends Activity {
+              private static final int PICK_FILE = 1;
+              private WebView web;
+              private ValueCallback<Uri[]> pendingPick;
+          
+              @Override
+              protected void onCreate(Bundle state) {
+                  super.onCreate(state);
+                  getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                  web = new WebView(this);
+                  WebSettings s = web.getSettings();
+                  s.setJavaScriptEnabled(true);
+                  s.setDomStorageEnabled(true);
+                  s.setMediaPlaybackRequiresUserGesture(false);
+                  s.setAllowFileAccess(true);
+                  web.setWebChromeClient(new WebChromeClient() {
+                      @Override
+                      public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
+                          if (pendingPick != null) pendingPick.onReceiveValue(null);
+                          pendingPick = callback;
+                          Intent pick = new Intent(Intent.ACTION_GET_CONTENT);
+                          pick.addCategory(Intent.CATEGORY_OPENABLE);
+                          pick.setType("*/*");
+                          try {
+                              startActivityForResult(Intent.createChooser(pick, "Choose an OpenBVE route (.csv)"), PICK_FILE);
+                          } catch (Exception e) {
+                              pendingPick = null;
+                              return false;
+                          }
+                          return true;
+                      }
+                  });
+                  setContentView(web);
+                  hideSystemBars();
+                  if (state != null) web.restoreState(state);
+                  else web.loadUrl("file:///android_asset/index.html");
+              }
+          
+              @Override
+              protected void onActivityResult(int request, int result, Intent data) {
+                  super.onActivityResult(request, result, data);
+                  if (request != PICK_FILE || pendingPick == null) return;
+                  Uri[] picked = null;
+                  if (result == RESULT_OK && data != null && data.getData() != null) picked = new Uri[] { data.getData() };
+                  pendingPick.onReceiveValue(picked);
+                  pendingPick = null;
+              }
+          
+              @SuppressWarnings("deprecation")
+              private void hideSystemBars() {
+                  getWindow().getDecorView().setSystemUiVisibility(
+                      View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_FULLSCREEN
+                      | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                      | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+              }
+          
+              @Override
+              public void onWindowFocusChanged(boolean hasFocus) {
+                  super.onWindowFocusChanged(hasFocus);
+                  if (hasFocus) hideSystemBars();
+              }
+          
+              @Override
+              protected void onSaveInstanceState(Bundle out) {
+                  super.onSaveInstanceState(out);
+                  web.saveState(out);
+              }
+          
+              @Override
+              protected void onPause() { super.onPause(); web.onPause(); }
+          
+              @Override
+              protected void onResume() { super.onResume(); web.onResume(); hideSystemBars(); }
+          
+              @Override
+              protected void onDestroy() { web.destroy(); super.onDestroy(); }
+          }
+          JAVA_EOF
+          cat > app/assets/index.html <<'HTML_EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+          <title>OpenRail Prototype</title>
+          <style>
+          :root{--hud:rgba(10,14,20,.82);--line:rgba(255,255,255,.12);--txt:#eef2f6;--mute:#9aa6b2;--red:#e4002b;--grn:#00a650;--amb:#ffb000}
+          *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+          html,body{margin:0;height:100%;overflow:hidden;background:#000;color:var(--txt);font:14px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;touch-action:none;user-select:none}
+          canvas{display:block;width:100vw;height:100vh}
+          #top{position:fixed;top:10px;left:10px;right:10px;display:flex;gap:8px;pointer-events:none;flex-wrap:wrap}
+          .pill{background:var(--hud);border:1px solid var(--line);border-radius:12px;padding:7px 11px;backdrop-filter:blur(6px)}
+          .pill small{display:block;color:var(--mute);font-size:10.5px;text-transform:uppercase;letter-spacing:.8px}
+          .pill b{font-size:16px;font-variant-numeric:tabular-nums}
+          #next{flex:1;min-width:170px}#next b{font-size:15px}
+          #dash{position:fixed;left:10px;bottom:10px;display:flex;gap:10px;align-items:flex-end;pointer-events:none}
+          #speedo{width:150px;height:150px;background:var(--hud);border:1px solid var(--line);border-radius:50%;position:relative}
+          #speedo svg{position:absolute;inset:0}
+          #spd{position:absolute;inset:0;display:grid;place-items:center;font:700 34px system-ui;font-variant-numeric:tabular-nums}
+          #spd span{display:block;font:500 11px system-ui;color:var(--mute);text-align:center;margin-top:-6px}
+          #notch{font:700 22px system-ui;min-width:70px;text-align:center}
+          #lamps{display:flex;gap:6px;flex-direction:column}
+          .lamp{font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px;background:#222a33;color:#55606b;letter-spacing:.5px}
+          .lamp.on{color:#111}.lamp.atp.on{background:var(--amb)}.lamp.door.on{background:#38bdf8}.lamp.ato.on{background:var(--grn);color:#fff}.lamp.spad.on{background:var(--red);color:#fff}
+          #lever{position:fixed;right:12px;bottom:12px;top:96px;width:86px;background:var(--hud);border:1px solid var(--line);border-radius:16px;display:flex;flex-direction:column;padding:8px 6px}
+          #lever .st{flex:1;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;border-radius:8px;color:var(--mute)}
+          #lever .st.p{color:#86efac}#lever .st.b{color:#fca5a5}#lever .st.eb{color:#fff;background:#5b0d17}
+          #lever .st.on{background:#fff;color:#000}
+          #btns{position:fixed;right:108px;bottom:12px;display:flex;flex-direction:column;gap:8px}
+          .btn{background:var(--hud);border:1px solid var(--line);color:var(--txt);border-radius:12px;padding:11px 14px;font:600 13px system-ui;min-width:76px;cursor:pointer}
+          .btn:active{background:#2b3440}
+          #toast{position:fixed;left:50%;top:38%;transform:translate(-50%,-50%);background:var(--hud);border:1px solid var(--line);border-radius:14px;padding:12px 18px;font-weight:600;font-size:16px;opacity:0;transition:opacity .3s;pointer-events:none;text-align:center}
+          #start{position:fixed;inset:0;background:radial-gradient(circle at 50% 30%,#1b2533,#07090c);display:flex;align-items:center;justify-content:center;z-index:9;padding:20px}
+          #start .box{max-width:440px;text-align:center}
+          #start h1{font-size:30px;margin:0 0 4px}#start h1 b{color:var(--red)}
+          #start p{color:var(--mute);margin:8px 0}
+          #start .go{background:var(--red);color:#fff;border:0;border-radius:14px;padding:15px 34px;font:700 18px system-ui;margin:14px 0 10px;cursor:pointer}
+          #start label{display:inline-block;color:var(--mute);border:1px dashed var(--line);border-radius:10px;padding:8px 12px;cursor:pointer;font-size:13px}
+          #start input{display:none}
+          .keys{font-size:12px;color:#6b7785;margin-top:12px}
+          @media (max-width:640px){#speedo{width:118px;height:118px}#spd{font-size:27px}#lever{width:70px;top:132px}#btns{right:90px;bottom:auto;top:132px}.btn{min-width:64px;padding:10px}}
+          </style>
+          </head>
+          <body>
+          <canvas id="c"></canvas>
+          <div id="top">
+            <div class="pill" id="next"><small>Next stop</small><b id="nextName">—</b><div style="color:var(--mute);font-size:12px" id="nextInfo"></div></div>
+            <div class="pill"><small>Time</small><b id="clock">--:--:--</b></div>
+            <div class="pill"><small>Limit</small><b id="limit">--</b></div>
+            <div class="pill"><small>Score</small><b id="score">0</b></div>
+          </div>
+          <div id="dash">
+            <div id="speedo"><svg viewBox="0 0 150 150"><circle cx="75" cy="75" r="62" fill="none" stroke="#28313b" stroke-width="9" stroke-dasharray="292 400" transform="rotate(135 75 75)"/>
+              <circle id="arc" cx="75" cy="75" r="62" fill="none" stroke="#fff" stroke-width="9" stroke-linecap="round" stroke-dasharray="0 400" transform="rotate(135 75 75)"/>
+              <circle id="lim" cx="75" cy="75" r="62" fill="none" stroke="var(--amb)" stroke-width="13" stroke-dasharray="2 400" transform="rotate(135 75 75)"/></svg>
+              <div id="spd"><div>0<span>km/h</span></div></div></div>
+            <div class="pill"><small>Handle</small><div id="notch">N</div></div>
+            <div id="lamps"><div class="lamp ato" id="lATO">ATO</div><div class="lamp atp" id="lATP">ATP</div><div class="lamp door" id="lDoor">DOOR</div><div class="lamp spad" id="lSPAD">SPAD</div></div>
+          </div>
+          <div id="btns"><button class="btn" id="bDoor">Doors</button><button class="btn" id="bATO">ATO</button><button class="btn" id="bCam">Camera</button><button class="btn" id="bHorn">Horn</button></div>
+          <div id="lever"></div>
+          <div id="toast"></div>
+          <div id="start"><div class="box">
+            <h1><b>Open</b>Rail</h1>
+            <p>A modern, browser-based train sim prototype that reads OpenBVE <code>.csv</code> route files.</p>
+            <p style="font-size:13px">Built-in demo: a made-up elevated line using East West Line station names. The layout is not real.</p>
+            <button class="go" id="go">Start driving</button><br>
+            <label>Or load your own OpenBVE route (.csv)<input type="file" id="file" accept=".csv,.txt"></label>
+            <div class="keys">Keys: W / ↑ more power · S / ↓ more brake · Backspace emergency brake · D doors · O ATO · C camera · H horn</div>
+          </div></div>
+          
+          <script>
+          "use strict";
+          /* ================================================================
+             1. ROUTE PARSER  (subset of the OpenBVE CSV route format)
+             Supported: .Curve .Pitch .Height .Sta .Stop .Limit .Section .Signal
+             Route.Comment, With Track/Route blocks, both "cmd a;b" and "cmd(a;b)".
+             Objects (.FreeObj, .Rail, structures) are ignored for now: scenery is
+             generated procedurally instead.
+          ================================================================ */
+          const DEMO_ROUTE = `; OpenRail demo - fictional layout, EWL station names
+          With Route
+          .Comment Demo line, elevated, 6 stations
+          .Timetable Demo
+          With Track
+          0, .Height 8, .Sta Pasir Ris;;07.00.00;0;-1, .Limit 80
+          140, .Stop -1
+          160, .Section 0;2
+          420, .Curve 900;0
+          900, .Curve 0;0
+          1300, .Pitch -12
+          1600, .Pitch 0
+          1900, .Sta Tampines;07.02.30;07.03.00;0;-1
+          2040, .Stop -1
+          2060, .Section 0;2
+          2300, .Curve -650;0, .Limit 65
+          2800, .Curve 0;0, .Limit 80
+          3300, .Sta Simei;07.05.00;07.05.30;0;1
+          3440, .Stop 1
+          3460, .Section 0;2
+          3700, .Pitch 15
+          4000, .Pitch 0
+          4100, .Curve 1200;0
+          4700, .Curve 0;0, .Limit 90
+          5300, .Sta Tanah Merah;07.08.00;07.08.40;0;-1
+          5440, .Stop -1
+          5460, .Section 0;2
+          5700, .Curve -800;0, .Limit 70
+          6200, .Curve 0;0, .Limit 80
+          6400, .Height 4
+          6800, .Sta Bedok;07.10.40;07.11.10;0;1
+          6940, .Stop 1
+          6960, .Section 0;2
+          7400, .Curve 700;0
+          7900, .Curve 0;0
+          8300, .Sta Kembangan;07.13.20;;0;-1
+          8440, .Stop -1
+          8600, .Limit 0
+          `;
+          
+          function parseTime(t) { // OpenBVE style HH.MMSS, also HH:MM:SS
+            if (!t) return null;
+            t = String(t).trim();
+            if (!t) return null;
+            let m = t.match(/^(\d{1,2})[.:](\d{2})(?:[.:]?(\d{2}))?$/);
+            if (!m) return null;
+            return (+m[1]) * 3600 + (+m[2]) * 60 + (m[3] ? +m[3] : 0);
+          }
+          
+          function splitOutside(line, sep) { // split on sep, but not inside ( )
+            const out = []; let depth = 0, cur = "";
+            for (const ch of line) {
+              if (ch === "(") depth++;
+              if (ch === ")") depth = Math.max(0, depth - 1);
+              if (ch === sep && depth === 0) { out.push(cur); cur = ""; } else cur += ch;
+            }
+            out.push(cur);
+            return out;
+          }
+          
+          function parseRoute(text) {
+            const route = { comment: "", curves: [], pitches: [], heights: [], stations: [], limits: [], signals: [], length: 0 };
+            let ns = "track", pos = 0;
+            for (let raw of text.split(/\r?\n/)) {
+              let line = raw.trim();
+              if (!line || line.startsWith(";")) continue;
+              for (let item of splitOutside(line, ",")) {
+                item = item.trim();
+                if (!item) continue;
+                if (/^-?\d+(\.\d+)?$/.test(item)) { pos = parseFloat(item); route.length = Math.max(route.length, pos); continue; }
+                let w = item.match(/^with\s+(\w+)/i);
+                if (w) { ns = w[1].toLowerCase(); continue; }
+                let m = item.match(/^(?:(\w+)\.|\.)?(\w+)\s*(?:\((.*)\)\s*(.*)|(.*))$/);
+                if (!m) continue;
+                const space = (m[1] || ns).toLowerCase();
+                const cmd = m[2].toLowerCase();
+                const argStr = m[3] !== undefined ? m[3] + (m[4] ? ";" + m[4] : "") : (m[5] || "");
+                const a = argStr.split(/[;,]/).map(s => s.trim());
+                const num = (i, d) => { const v = parseFloat(a[i]); return isFinite(v) ? v : d; };
+                if (space === "route" && cmd === "comment") { route.comment = argStr.trim(); continue; }
+                if (space !== "track") continue;
+                switch (cmd) {
+                  case "curve": route.curves.push({ s: pos, r: num(0, 0) }); break;
+                  case "pitch": route.pitches.push({ s: pos, p: num(0, 0) }); break;
+                  case "height": route.heights.push({ s: pos, h: num(0, 0) }); break;
+                  case "limit": route.limits.push({ s: pos, v: num(0, 0) }); break;
+                  case "sta": route.stations.push({ s: pos, name: a[0] || "Station", arr: parseTime(a[1]), dep: parseTime(a[2]),
+                    doors: num(4, -1), stop: null }); break;
+                  case "stop": {
+                    const st = route.stations[route.stations.length - 1];
+                    if (st && st.stop === null && pos >= st.s && pos - st.s < 600) { st.stop = pos; st.side = num(0, st.doors || -1); }
+                    break;
+                  }
+                  case "section": case "signal": case "sigf": route.signals.push({ s: pos }); break;
+                }
+              }
+            }
+            for (const st of route.stations) {
+              if (st.stop === null) st.stop = st.s + 100;
+              if (!st.side) st.side = st.doors > 0 ? 1 : -1;
+              route.length = Math.max(route.length, st.stop + 50);
+            }
+            route.length += 400;
+            const byS = (x, y) => x.s - y.s;
+            ["curves", "pitches", "heights", "limits", "signals"].forEach(k => route[k].sort(byS));
+            return route;
+          }
+          
+          /* value of a piecewise-constant list at s */
+          function stepAt(list, s, key, def) {
+            let v = def;
+            for (const e of list) { if (e.s <= s) v = e[key]; else break; }
+            return v;
+          }
+          
+          /* ================================================================
+             2. TRACK GEOMETRY  - integrate heading and elevation along s
+          ================================================================ */
+          const DS = 2.5;
+          function buildTrack(route) {
+            const n = Math.ceil(route.length / DS) + 2;
+            const X = new Float64Array(n), Y = new Float64Array(n), Z = new Float64Array(n), H = new Float64Array(n),
+                  HT = new Float64Array(n), R = new Float64Array(n);
+            let x = 0, y = 0, z = 0, h = 0;
+            // rail height above ground: interpolate between .Height commands
+            const hp = route.heights.length ? route.heights : [{ s: 0, h: 0.3 }];
+            const heightAt = s => {
+              if (s <= hp[0].s) return hp[0].h;
+              for (let i = 0; i < hp.length - 1; i++)
+                if (s < hp[i + 1].s) { const t = (s - hp[i].s) / (hp[i + 1].s - hp[i].s); return hp[i].h + (hp[i + 1].h - hp[i].h) * t; }
+              return hp[hp.length - 1].h;
+            };
+            for (let i = 0; i < n; i++) {
+              const s = i * DS;
+              X[i] = x; Y[i] = y; Z[i] = z; H[i] = h; HT[i] = heightAt(s);
+              const r = stepAt(route.curves, s, "r", 0); R[i] = r;
+              const p = stepAt(route.pitches, s, "p", 0);
+              if (r !== 0) h += DS / r;
+              x += Math.sin(h) * DS; z -= Math.cos(h) * DS; y += p / 1000 * DS;
+            }
+            const baseY = HT[0];
+            for (let i = 0; i < n; i++) Y[i] += baseY; // so ground at s=0 is y=0
+            return { n, X, Y, Z, H, HT, R, len: (n - 1) * DS };
+          }
+          
+          /* position + frame at distance s (interpolated) */
+          function frameAt(tr, s) {
+            s = Math.max(0, Math.min(tr.len - 0.001, s));
+            const i = Math.floor(s / DS), t = s / DS - i, j = Math.min(i + 1, tr.n - 1);
+            const L = (A) => A[i] + (A[j] - A[i]) * t;
+            const h = L(tr.H);
+            const f = [Math.sin(h), (tr.Y[j] - tr.Y[i]) / DS, -Math.cos(h)];
+            return { p: [L(tr.X), L(tr.Y), L(tr.Z)], f, r: [Math.cos(h), 0, Math.sin(h)], ht: L(tr.HT), radius: tr.R[i] };
+          }
+          
+          /* ================================================================
+             3. TRAIN PHYSICS + SIGNALLING + ATO
+          ================================================================ */
+          const NOTCH_MIN = -8, NOTCH_MAX = 4; // -8 EB, -7..-1 B7..B1, 0 N, 1..4 P1..P4
+          function notchName(n) { return n === -8 ? "EB" : n < 0 ? "B" + (-n) : n === 0 ? "N" : "P" + n; }
+          
+          function accelFor(notch, v, pitch) { // v in m/s, returns m/s^2
+            let a = 0;
+            if (notch > 0) { const amax = v < 10 ? 1.0 : 1.0 * 10 / v; a = amax * notch / 4; }
+            else if (notch < 0) a = notch === -8 ? -1.4 : -1.1 * (-notch) / 7;
+            const resist = v > 0.01 ? 0.012 + 0.00005 * v * v : 0;
+            a -= resist + 9.81 * pitch / 1000;
+            return a;
+          }
+          
+          function makeSim(route) {
+            const first = route.stations[0];
+            const startS = first ? first.stop : 30;
+            const t0 = first && first.dep !== null ? first.dep - 25 : 7 * 3600;
+            return { s: startS, v: 0, notch: -7, time: t0, score: 0, ato: false, atp: false, spad: false,
+                     doors: first ? "open" : "closed", doorTimer: first ? 0 : 0, stIndex: first ? 0 : -1,
+                     departOK: false, msg: "", ebLatch: false };
+          }
+          
+          function limitAt(route, s) { const v = stepAt(route.limits, s, "v", 0); return v > 0 ? v : 999; }
+          function pitchAt(route, s) { return stepAt(route.pitches, s, "p", 0); }
+          
+          /* the station the train should stop at next (index), or -1 */
+          function nextStation(route, sim) {
+            for (let i = 0; i < route.stations.length; i++) {
+              if (route.stations[i].stop > sim.s - 6 && !(i === sim.stIndex && sim.departOK)) return i;
+            }
+            return -1;
+          }
+          
+          /* signal aspect: red if it is the starter of the station we're dwelling at */
+          function signalRed(route, sim, sig) {
+            if (sim.stIndex < 0 || sim.departOK) return false;
+            const st = route.stations[sim.stIndex];
+            return sig.s > st.stop && sig.s - st.stop < 80;
+          }
+          
+          function atoNotch(route, sim) {
+            const ni = nextStation(route, sim);
+            if (ni < 0) return -7; // end of the line
+            const v = sim.v * 3.6, ms = sim.v, BSTEP = 1.1 / 7;
+            let target = limitAt(route, sim.s) - 4, need = 0; // need = deceleration required (m/s^2)
+            const plan = (d, vEnd) => { if (d > 0.05 && ms > vEnd) need = Math.max(need, (ms * ms - vEnd * vEnd) / (2 * d)); };
+            // look ahead for lower limits
+            for (const L of route.limits) if (L.s > sim.s && L.s - sim.s < 800 && L.v > 0) plan(L.s - sim.s, (L.v - 4) / 3.6);
+            if (ni >= 0) {
+              const st = route.stations[ni];
+              if (ni === sim.stIndex && !sim.departOK) return -7;
+              const d = st.stop - sim.s;
+              if (d < 0.3) return -7;
+              if (d < 4) target = Math.min(target, 1.5 + d * 0.8);
+              else plan(d - 2.3, 0);
+            }
+            if (need > 0.6) return -Math.min(7, Math.ceil((need + 0.05) / BSTEP));
+            if (need > 0.45) return 0; // coast before braking
+            const e = target - v;
+            if (e > 6) return 4; if (e > 3) return 2; if (e > 0.5) return 1;
+            if (e > -1.5) return 0;
+            return Math.max(-7, Math.round(e / 2.2));
+          }
+          
+          function stepSim(route, sim, dt, input) {
+            const notes = [];
+            sim.time += dt;
+            if (sim.ato) sim.notch = atoNotch(route, sim);
+            let notch = sim.notch;
+            if (sim.doors !== "closed") notch = Math.min(notch, -4); // door interlock
+            // ATP overspeed protection
+            const lim = limitAt(route, sim.s);
+            if (sim.v * 3.6 > lim + 3) sim.atp = true;
+            if (sim.atp && sim.v * 3.6 < lim - 1) sim.atp = false;
+            if (sim.atp) notch = Math.min(notch, -7);
+            if (sim.ebLatch) { notch = -8; if (sim.v < 0.01) { sim.ebLatch = false; sim.spad = false; } }
+            const a = accelFor(notch, sim.v, pitchAt(route, sim.s));
+            const oldS = sim.s;
+            sim.v = Math.max(0, sim.v + a * dt);
+            if (sim.v === 0 && notch <= 0) sim.v = 0;
+            sim.s += sim.v * dt;
+            const buffer = route.length - 340;
+            if (sim.s >= buffer) { if (sim.v > 0.5) { notes.push("Hit the buffer stop! −300"); sim.score -= 300; } sim.s = buffer; sim.v = 0; }
+            // passing a red signal
+            for (const sig of route.signals) if (sig.s > oldS && sig.s <= sim.s && signalRed(route, sim, sig)) {
+              sim.spad = true; sim.ebLatch = true; sim.score -= 200; notes.push("Signal passed at danger! −200");
+            }
+            // doors / dwell
+            if (sim.doors === "open") {
+              sim.doorTimer += dt;
+              const st = route.stations[sim.stIndex];
+              const depOK = !st || st.dep === null || sim.time >= st.dep;
+              if (sim.doorTimer > 15 && depOK && (input.closeDoors || sim.ato || sim.autoClose)) {
+                sim.doors = "closed"; sim.departOK = true; sim.autoClose = false; notes.push("Doors closed · signal clear");
+              }
+            }
+            if (sim.ato && sim.doors === "closed" && sim.v < 0.02) {
+              const ni = nextStation(route, sim);
+              if (ni >= 0 && Math.abs(sim.s - route.stations[ni].stop) <= 5 && !(ni === sim.stIndex && sim.departOK)) input.openDoors = true;
+            }
+            if (input.openDoors && sim.doors === "closed" && sim.v < 0.05) {
+              const ni = nextStation(route, sim);
+              if (ni >= 0) {
+                const st = route.stations[ni], err = sim.s - st.stop;
+                if (Math.abs(err) <= 5) {
+                  sim.doors = "open"; sim.doorTimer = 0; sim.stIndex = ni; sim.departOK = false; sim.autoClose = false;
+                  const pts = Math.abs(err) < 0.5 ? 100 : Math.abs(err) < 1.5 ? 60 : 25;
+                  let late = st.arr !== null ? Math.round(sim.time - st.arr) : 0;
+                  let latePts = late > 0 ? -Math.min(100, Math.floor(late / 5) * 5) : 0;
+                  sim.score += pts + latePts;
+                  notes.push(`${st.name}: stopped ${err >= 0 ? "+" : ""}${err.toFixed(2)} m  +${pts}` + (late > 0 ? `  ·  ${late}s late ${latePts}` : ""));
+                } else notes.push(Math.abs(err) < 60 ? `Not at the stop mark (${err.toFixed(1)} m)` : "No platform here");
+              }
+            }
+            if (sim.ato && sim.doors === "open") sim.autoClose = true;
+            return notes;
+          }
+          
+          /* ================================================================
+             4. RENDERER (WebGL2, no libraries)
+          ================================================================ */
+          const M = {
+            persp(fy, asp, n, f) { const t = 1 / Math.tan(fy / 2), d = n - f;
+              return new Float32Array([t / asp, 0, 0, 0, 0, t, 0, 0, 0, 0, (f + n) / d, -1, 0, 0, 2 * f * n / d, 0]); },
+            look(e, c, u) {
+              let z = norm(sub(e, c)), x = norm(cross(u, z)), y = cross(z, x);
+              return new Float32Array([x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0,
+                -dot(x, e), -dot(y, e), -dot(z, e), 1]);
+            },
+            mul(a, b) { const o = new Float32Array(16);
+              for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) { let s = 0; for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k]; o[c * 4 + r] = s; }
+              return o; },
+            inv(m) { // general 4x4 inverse
+              const a = m, o = new Float32Array(16);
+              const b00 = a[0] * a[5] - a[1] * a[4], b01 = a[0] * a[6] - a[2] * a[4], b02 = a[0] * a[7] - a[3] * a[4],
+                b03 = a[1] * a[6] - a[2] * a[5], b04 = a[1] * a[7] - a[3] * a[5], b05 = a[2] * a[7] - a[3] * a[6],
+                b06 = a[8] * a[13] - a[9] * a[12], b07 = a[8] * a[14] - a[10] * a[12], b08 = a[8] * a[15] - a[11] * a[12],
+                b09 = a[9] * a[14] - a[10] * a[13], b10 = a[9] * a[15] - a[11] * a[13], b11 = a[10] * a[15] - a[11] * a[14];
+              const det = 1 / (b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06);
+              o[0] = (a[5] * b11 - a[6] * b10 + a[7] * b09) * det; o[1] = (a[2] * b10 - a[1] * b11 - a[3] * b09) * det;
+              o[2] = (a[13] * b05 - a[14] * b04 + a[15] * b03) * det; o[3] = (a[10] * b04 - a[9] * b05 - a[11] * b03) * det;
+              o[4] = (a[6] * b08 - a[4] * b11 - a[7] * b07) * det; o[5] = (a[0] * b11 - a[2] * b08 + a[3] * b07) * det;
+              o[6] = (a[14] * b02 - a[12] * b05 - a[15] * b01) * det; o[7] = (a[8] * b05 - a[10] * b02 + a[11] * b01) * det;
+              o[8] = (a[4] * b10 - a[5] * b08 + a[7] * b06) * det; o[9] = (a[1] * b08 - a[0] * b10 - a[3] * b06) * det;
+              o[10] = (a[12] * b04 - a[13] * b02 + a[15] * b00) * det; o[11] = (a[9] * b02 - a[8] * b04 - a[11] * b00) * det;
+              o[12] = (a[5] * b07 - a[4] * b09 - a[6] * b06) * det; o[13] = (a[0] * b09 - a[1] * b07 + a[2] * b06) * det;
+              o[14] = (a[13] * b01 - a[12] * b03 - a[14] * b00) * det; o[15] = (a[8] * b03 - a[9] * b01 + a[10] * b00) * det;
+              return o; },
+            ident() { return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]); }
+          };
+          function sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+          function add(a, b) { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; }
+          function scl(a, k) { return [a[0] * k, a[1] * k, a[2] * k]; }
+          function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+          function cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+          function norm(a) { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; }
+          
+          /* Mesh builder: position(3) normal(3) colour(4: rgb + emissive) uv(2) */
+          class Builder {
+            constructor() { this.v = []; this.i = []; }
+            get count() { return this.v.length / 12; }
+            quad(a, b, c, d, col, uv) { // a b c d counter-clockwise seen from the front
+              const n = norm(cross(sub(b, a), sub(d, a))), base = this.count;
+              const uvs = uv || [[0, 0], [1, 0], [1, 1], [0, 1]];
+              [a, b, c, d].forEach((p, k) => this.v.push(p[0], p[1], p[2], n[0], n[1], n[2], col[0], col[1], col[2], col[3] || 0, uvs[k][0], uvs[k][1]));
+              this.i.push(base, base + 1, base + 2, base, base + 2, base + 3);
+            }
+            /* oriented box: centre c, axes f (length), r (width), u (height) */
+            box(c, f, r, u, L, W, Hh, col, skipBottom = true) {
+              const hf = scl(f, L / 2), hr = scl(r, W / 2), hu = scl(u, Hh / 2);
+              const P = (sf, sr, su) => add(add(add(c, scl(hf, sf)), scl(hr, sr)), scl(hu, su));
+              const [p000, p100, p110, p010, p001, p101, p111, p011] =
+                [P(-1, -1, -1), P(1, -1, -1), P(1, 1, -1), P(-1, 1, -1), P(-1, -1, 1), P(1, -1, 1), P(1, 1, 1), P(-1, 1, 1)];
+              // r must equal cross(f, u) so that every face winds outwards
+              this.quad(p001, p011, p111, p101, col);               // top
+              this.quad(p000, p001, p101, p100, shade(col, .85));   // left side (-r)
+              this.quad(p010, p110, p111, p011, shade(col, .85));   // right side (+r)
+              this.quad(p100, p101, p111, p110, shade(col, .75));   // front (+f)
+              this.quad(p000, p010, p011, p001, shade(col, .75));   // back (-f)
+              if (!skipBottom) this.quad(p000, p100, p110, p010, shade(col, .6));
+            }
+          }
+          function shade(c, k) { return [c[0] * k, c[1] * k, c[2] * k, c[3] || 0]; }
+          
+          const VS = `#version 300 es
+          layout(location=0) in vec3 aP; layout(location=1) in vec3 aN; layout(location=2) in vec4 aC; layout(location=3) in vec2 aUV;
+          uniform mat4 uVP, uModel; out vec3 vN, vW; out vec4 vC; out vec2 vUV;
+          void main(){ vec4 w = uModel*vec4(aP,1.0); vW=w.xyz; vN=mat3(uModel)*aN; vC=aC; vUV=aUV; gl_Position=uVP*w; }`;
+          const FS = `#version 300 es
+          precision highp float;
+          in vec3 vN, vW; in vec4 vC; in vec2 vUV; out vec4 o;
+          uniform vec3 uSun, uEye, uFog; uniform vec4 uTint; uniform int uMode; uniform sampler2D uTex; uniform float uFogD;
+          float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }
+          float noise(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+            return mix(mix(hash(i),hash(i+vec2(1,0)),f.x), mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x), f.y); }
+          void main(){
+            vec3 base = vC.rgb; float em = vC.a;
+            if (uMode==1) { // procedural ground
+              float n = noise(vW.xz*0.05)*0.6 + noise(vW.xz*0.4)*0.3 + noise(vW.xz*3.0)*0.1;
+              base = mix(vec3(0.20,0.33,0.14), vec3(0.36,0.47,0.20), n);
+            }
+            if (uMode==2) { vec4 t = texture(uTex, vUV); base = t.rgb; em = 0.6; }
+            if (uTint.a > 0.0) { base = uTint.rgb; em = uTint.a; }
+            vec3 n = normalize(vN);
+            float lam = max(dot(n, uSun), 0.0);
+            vec3 amb = mix(vec3(0.42,0.40,0.36), vec3(0.62,0.70,0.85), n.y*0.5+0.5);
+            vec3 col = base*(amb*0.62 + vec3(1.0,0.96,0.88)*lam*0.78);
+            col = mix(col, base*1.25, clamp(em,0.0,1.0));
+            float d = length(vW - uEye);
+            float f = 1.0 - exp(-pow(d/uFogD, 1.6));
+            col = mix(col, uFog, clamp(f,0.0,1.0));
+            o = vec4(pow(col, vec3(0.95)), 1.0);
+          }`;
+          const SKY_VS = `#version 300 es
+          const vec2 P[3] = vec2[3](vec2(-1,-1), vec2(3,-1), vec2(-1,3));
+          out vec2 vP; void main(){ vP=P[gl_VertexID]; gl_Position=vec4(P[gl_VertexID],0.9999,1); }`;
+          const SKY_FS = `#version 300 es
+          precision highp float; in vec2 vP; out vec4 o; uniform mat4 uInvVP; uniform vec3 uSun, uFog;
+          void main(){
+            vec4 a = uInvVP*vec4(vP,-1,1), b = uInvVP*vec4(vP,1,1);
+            vec3 d = normalize(b.xyz/b.w - a.xyz/a.w);
+            float h = clamp(d.y, 0.0, 1.0);
+            vec3 col = mix(uFog, vec3(0.30,0.52,0.86), pow(h, 0.55));
+            float s = max(dot(d, uSun), 0.0);
+            col += vec3(1.0,0.85,0.6)*pow(s, 600.0)*3.0 + vec3(1.0,0.8,0.5)*pow(s, 8.0)*0.18;
+            o = vec4(col,1);
+          }`;
+          
+          function compile(gl, vs, fs) {
+            const p = gl.createProgram();
+            for (const [type, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
+              const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+              if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+              gl.attachShader(p, s);
+            }
+            gl.linkProgram(p);
+            if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+            const u = {}; const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+            for (let i = 0; i < n; i++) { const name = gl.getActiveUniform(p, i).name; u[name] = gl.getUniformLocation(p, name); }
+            return { p, u };
+          }
+          
+          function upload(gl, b) {
+            if (!b.count) return null;
+            const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
+            const vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(b.v), gl.STATIC_DRAW);
+            const ib = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(b.i), gl.STATIC_DRAW);
+            const st = 48;
+            [[0, 3, 0], [1, 3, 12], [2, 4, 24], [3, 2, 40]].forEach(([l, s, o]) => { gl.enableVertexAttribArray(l); gl.vertexAttribPointer(l, s, gl.FLOAT, false, st, o); });
+            gl.bindVertexArray(null);
+            return { vao, n: b.i.length, bufs: [vb, ib] };
+          }
+          
+          /* seeded random so scenery is the same every run */
+          function rng(seed) { let s = seed >>> 0 || 1; return () => ((s = Math.imul(s ^ (s >>> 15), 2246822519) ^ Math.imul(s ^ (s >>> 13), 3266489917), (s >>> 0) / 4294967296)); }
+          
+          const COL = {
+            rail: [0.55, 0.55, 0.58], sleeper: [0.48, 0.47, 0.45], ballast: [0.42, 0.40, 0.37], deck: [0.70, 0.69, 0.66],
+            pillar: [0.75, 0.74, 0.71], third: [0.62, 0.55, 0.30], plat: [0.80, 0.78, 0.74], edge: [0.95, 0.80, 0.10],
+            roof: [0.30, 0.33, 0.37], pole: [0.25, 0.26, 0.28], stop: [0.95, 0.95, 0.95]
+          };
+          const BLD = [[0.92, 0.90, 0.84], [0.86, 0.80, 0.70], [0.80, 0.86, 0.88], [0.93, 0.84, 0.78], [0.84, 0.88, 0.80], [0.90, 0.90, 0.92]];
+          
+          const CHUNK = 250;
+          function buildChunk(route, tr, k) {
+            const b = new Builder(), s0 = k * CHUNK, s1 = Math.min(tr.len - DS, s0 + CHUNK);
+            const UP = [0, 1, 0];
+            if (s0 >= s1) return b;
+            for (let s = s0; s < s1; s += DS) {
+              const A = frameAt(tr, s), B = frameAt(tr, s + DS), mid = scl(add(A.p, B.p), 0.5);
+              const f = norm(sub(B.p, A.p)), r = A.r, segL = Math.hypot(...sub(B.p, A.p)) + 0.02;
+              // rails + third rail
+              for (const off of [-0.7175, 0.7175]) b.box(add(add(mid, scl(r, off)), [0, -0.07, 0]), f, r, UP, segL, 0.07, 0.14, COL.rail);
+              b.box(add(add(mid, scl(r, -1.45)), [0, -0.05, 0]), f, r, UP, segL, 0.1, 0.1, COL.third);
+              // ballast (trapezoid)
+              const bt = -0.30, bb = -0.75;
+              const P = (F, o, y) => add(add(F.p, scl(F.r, o)), [0, y, 0]);
+              b.quad(P(A, -1.8, bt), P(A, 1.8, bt), P(B, 1.8, bt), P(B, -1.8, bt), COL.ballast);
+              b.quad(P(A, 1.8, bt), P(A, 2.6, bb), P(B, 2.6, bb), P(B, 1.8, bt), shade(COL.ballast, .85));
+              b.quad(P(A, -2.6, bb), P(A, -1.8, bt), P(B, -1.8, bt), P(B, -2.6, bb), shade(COL.ballast, .85));
+              const ht = A.ht;
+              if (ht > 3) { // viaduct deck
+                b.box(add(mid, [0, -1.35, 0]), f, r, UP, segL, 6.2, 1.2, COL.deck);
+                b.box(add(add(mid, scl(r, 3.0)), [0, -0.25, 0]), f, r, UP, segL, 0.2, 0.9, COL.deck);  // parapets
+                b.box(add(add(mid, scl(r, -3.0)), [0, -0.25, 0]), f, r, UP, segL, 0.2, 0.9, COL.deck);
+                if (Math.floor(s / 30) !== Math.floor((s + DS) / 30)) {
+                  const hh = ht - 1.9;
+                  b.box(add(mid, [0, -1.95 - hh / 2, 0]), f, r, UP, 1.6, 2.2, hh, COL.pillar);
+                }
+              } else if (ht > 0.8) { // embankment
+                b.quad(P(A, 2.6, bb), P(A, 2.6 + ht * 1.5, -ht), P(B, 2.6 + ht * 1.5, -ht), P(B, 2.6, bb), [0.33, 0.42, 0.22]);
+                b.quad(P(A, -2.6 - ht * 1.5, -ht), P(A, -2.6, bb), P(B, -2.6, bb), P(B, -2.6 - ht * 1.5, -ht), [0.33, 0.42, 0.22]);
+              }
+            }
+            // sleepers
+            for (let s = Math.ceil(s0 / 0.7) * 0.7; s < s1; s += 0.7) {
+              const F = frameAt(tr, s);
+              b.box(add(F.p, [0, -0.24, 0]), F.f, F.r, UP, 0.24, 2.4, 0.14, COL.sleeper);
+            }
+            // platforms
+            for (const st of route.stations) {
+              const a = Math.max(s0, st.stop - 150), z = Math.min(s1, st.stop + 8);
+              if (a >= z) continue;
+              const side = st.side > 0 ? 1 : -1;
+              for (let s = a; s < z; s += DS) {
+                const F = frameAt(tr, s), L = Math.min(DS, z - s) + 0.02, c = add(F.p, scl(F.r, side * 3.3));
+                b.box(add(c, [0, 0.45, 0]), F.f, F.r, UP, L, 3.2, 1.5, COL.plat);
+                b.box(add(add(F.p, scl(F.r, side * 1.78)), [0, 1.21, 0]), F.f, F.r, UP, L, 0.25, 0.03, COL.edge);
+                b.box(add(add(F.p, scl(F.r, side * 3.3)), [0, 5.2, 0]), F.f, F.r, UP, L, 4.6, 0.25, COL.roof);
+                if (Math.floor(s / 12) !== Math.floor((s + DS) / 12)) b.box(add(add(F.p, scl(F.r, side * 4.4)), [0, 3.2, 0]), F.f, F.r, UP, 0.25, 0.25, 4, COL.pole);
+              }
+              if (st.stop >= s0 && st.stop < s1) { // stop marker board
+                const F = frameAt(tr, st.stop);
+                b.box(add(add(F.p, scl(F.r, side * 2.3)), [0, 1.9, 0]), F.f, F.r, UP, 0.05, 0.6, 0.6, [1, 1, 1, .5]);
+                b.box(add(add(F.p, scl(F.r, side * 2.3)), [0, 1.4, 0]), F.f, F.r, UP, 0.08, 0.08, 0.5, COL.pole);
+              }
+            }
+            // signal posts (lamps drawn dynamically)
+            for (const sig of route.signals) if (sig.s >= s0 && sig.s < s1) {
+              const F = frameAt(tr, sig.s), base = add(F.p, scl(F.r, -2.3));
+              b.box(add(base, [0, 1.6, 0]), F.f, F.r, UP, 0.15, 0.15, 3.6, COL.pole);
+              b.box(add(base, [0, 3.7, 0]), F.f, F.r, UP, 0.3, 0.5, 1.0, [0.08, 0.08, 0.09]);
+            }
+            // scenery
+            const R = rng(k * 7919 + 17);
+            for (let i = 0; i < 9; i++) {
+              const s = s0 + R() * (s1 - s0), F = frameAt(tr, s), side = R() < 0.5 ? -1 : 1;
+              const tall = R() < 0.55, w = 12 + R() * 16, d = 14 + R() * 30, h = tall ? 35 + R() * 50 : 8 + R() * 14;
+              let off = 22 + Math.hypot(w, d) / 2 + R() * 120; // keep the whole footprint clear of the track
+              if (F.radius && Math.sign(F.radius) === side) off = Math.min(off, Math.abs(F.radius) * 0.6);
+              if (off - Math.hypot(w, d) / 2 < 18) continue;
+              const g = add(add(F.p, scl(F.r, side * off)), [0, -F.ht, 0]);
+              const col = BLD[Math.floor(R() * BLD.length)];
+              const ang = (R() - 0.5) * 0.4, fr = norm([F.f[0] * Math.cos(ang) - F.f[2] * Math.sin(ang), 0, F.f[0] * Math.sin(ang) + F.f[2] * Math.cos(ang)]);
+              const rr = [-fr[2], 0, fr[0]];
+              b.box(add(g, [0, h / 2, 0]), fr, rr, UP, d, w, h, col);
+              // window bands
+              for (let y = 3; y < h - 2; y += 3) b.box(add(g, [0, y, 0]), fr, rr, UP, d + 0.1, w + 0.1, 0.7, shade(col, 0.55));
+              b.box(add(g, [0, h + 0.4, 0]), fr, rr, UP, d * 0.4, w * 0.5, 0.8, shade(col, 0.7));
+            }
+            for (let i = 0; i < 26; i++) { // trees
+              const s = s0 + R() * (s1 - s0), F = frameAt(tr, s), side = R() < 0.5 ? -1 : 1;
+              let off = 8 + R() * 30;
+              if (F.radius && Math.sign(F.radius) === side) off = Math.min(off, Math.abs(F.radius) * 0.6);
+              if (off < 7) continue;
+              if (route.stations.some(st => s > st.stop - 160 && s < st.stop + 15) && off < 9) continue;
+              const g = add(add(F.p, scl(F.r, side * off)), [0, -F.ht, 0]), h = 4 + R() * 6, cw = 3 + R() * 3;
+              b.box(add(g, [0, h * 0.3, 0]), F.f, F.r, UP, 0.4, 0.4, h * 0.6, [0.35, 0.26, 0.18]);
+              b.box(add(g, [0, h * 0.75, 0]), F.f, F.r, UP, cw, cw, h * 0.55, [0.16 + R() * .08, 0.36 + R() * .1, 0.14]);
+            }
+            return b;
+          }
+          
+          function signTexture(gl, text) {
+            const c = document.createElement("canvas"); c.width = 512; c.height = 96;
+            const x = c.getContext("2d");
+            x.fillStyle = "#1d2a36"; x.fillRect(0, 0, 512, 96);
+            x.fillStyle = "#00a650"; x.fillRect(0, 0, 14, 96);
+            x.fillStyle = "#fff"; x.font = "bold 46px system-ui,sans-serif"; x.textBaseline = "middle";
+            x.fillText(text.slice(0, 18), 36, 50);
+            const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, c);
+            gl.generateMipmap(gl.TEXTURE_2D);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+            return t;
+          }
+          
+          /* ================================================================
+             5. APP
+          ================================================================ */
+          function startApp(routeText) {
+            const canvas = document.getElementById("c");
+            const gl = canvas.getContext("webgl2", { antialias: true });
+            if (!gl) { alert("This browser does not support WebGL2."); return; }
+            const route = parseRoute(routeText);
+            if (route.length < 500) { alert("That route looks empty - no track positions found."); return; }
+            const tr = buildTrack(route);
+            const sim = makeSim(route);
+            const prog = compile(gl, VS, FS), sky = compile(gl, SKY_VS, SKY_FS);
+            const skyVAO = gl.createVertexArray();
+            const chunks = new Map();
+            const sun = norm([0.45, 0.75, 0.35]), fog = [0.74, 0.80, 0.86];
+          
+            // station signs
+            const signs = route.stations.map(st => {
+              const b = new Builder(), side = st.side > 0 ? 1 : -1;
+              for (let s = st.stop - 130; s < st.stop; s += 40) {
+                const F = frameAt(tr, s), c = add(add(F.p, scl(F.r, side * 1.95)), [0, 4.4, 0]);
+                const hf = scl(F.f, 1.6), hu = [0, 0.3, 0];
+                // face the track
+                const a = sub(sub(c, hf), hu), bb = add(sub(c, hu), hf), cc = add(add(c, hu), hf), d = add(sub(c, hf), hu);
+                if (side < 0) b.quad(a, bb, cc, d, [1, 1, 1], [[0, 1], [1, 1], [1, 0], [0, 0]]);
+                else b.quad(bb, a, d, cc, [1, 1, 1], [[0, 1], [1, 1], [1, 0], [0, 0]]);
+              }
+              return { mesh: upload(gl, b), tex: signTexture(gl, st.name) };
+            });
+            // lamp mesh (unit cube)
+            const LF = [0, 0, -1], LR = [1, 0, 0], LU = [0, 1, 0]; // local axes: forward = -z
+            const lampB = new Builder(); lampB.box([0, 0, 0], LF, LR, LU, 1, 1, 1, [1, 1, 1], false);
+            const lamp = upload(gl, lampB);
+            // train car (local coords, front of the car at z = -CAR/2)
+            const CAR = 23, GAP = 0.6;
+            const carMesh = lead => {
+              const b = new Builder(), body = [0.90, 0.91, 0.92];
+              b.box([0, 2.05, 0], LF, LR, LU, CAR, 3.15, 3.1, body, false);
+              b.box([0, 2.55, 0], LF, LR, LU, CAR - 1.2, 3.2, 1.0, [0.10, 0.12, 0.15]);   // window band
+              b.box([0, 1.55, 0], LF, LR, LU, CAR + 0.02, 3.18, 0.22, [0.85, 0.05, 0.12]); // red stripe
+              b.box([0, 1.32, 0], LF, LR, LU, CAR + 0.02, 3.18, 0.16, [0.00, 0.60, 0.30]); // green stripe
+              b.box([0, 0.45, 0], LF, LR, LU, CAR - 4, 2.6, 0.5, [0.18, 0.18, 0.2]);     // underframe
+              for (const z of [-CAR / 2 + 3, CAR / 2 - 3]) b.box([0, 0.45, z], LF, LR, LU, 2.6, 2.2, 0.7, [0.12, 0.12, 0.13]); // bogies
+              if (lead) {
+                b.box([0, 2.6, -CAR / 2 - 0.05], LF, LR, LU, 0.12, 2.6, 1.2, [0.05, 0.06, 0.08]);           // windscreen
+                for (const x of [-1.1, 1.1]) b.box([x, 1.0, -CAR / 2 - 0.06], LF, LR, LU, 0.1, 0.35, 0.18, [1, 1, 0.9, 1]); // headlights
+              }
+              return upload(gl, b);
+            };
+            const carLead = carMesh(true), carMid = carMesh(false);
+            const NCARS = 6;
+            function modelAt(s, yOff = 0) {
+              const A = frameAt(tr, s + CAR / 2 - 3), B = frameAt(tr, s - CAR / 2 + 3); // between bogie centres
+              const p = scl(add(A.p, B.p), 0.5), f = norm(sub(A.p, B.p)), r = norm(cross(f, [0, 1, 0])), u = cross(r, f);
+              return new Float32Array([r[0], r[1], r[2], 0, u[0], u[1], u[2], 0, -f[0], -f[1], -f[2], 0, p[0], p[1] + yOff, p[2], 1]);
+            }
+            // ground plane (follows camera)
+            const gB = new Builder(); gB.quad([-3000, 0, 3000], [3000, 0, 3000], [3000, 0, -3000], [-3000, 0, -3000], [1, 1, 1]);
+            const ground = upload(gl, gB);
+          
+            function chunk(k) {
+              if (!chunks.has(k)) chunks.set(k, upload(gl, buildChunk(route, tr, k)));
+              return chunks.get(k);
+            }
+          
+            // ---------- UI ----------
+            const $ = id => document.getElementById(id);
+            const leverEl = $("lever");
+            for (let n = NOTCH_MAX; n >= NOTCH_MIN; n--) {
+              const d = document.createElement("div");
+              d.className = "st " + (n > 0 ? "p" : n === -8 ? "eb" : n < 0 ? "b" : "");
+              d.textContent = notchName(n); d.dataset.n = n; leverEl.appendChild(d);
+            }
+            const setNotch = n => { if (sim.ato) { sim.ato = false; toast("ATO off"); } sim.notch = Math.max(NOTCH_MIN, Math.min(NOTCH_MAX, n)); if (n === -8) sim.ebLatch = true; };
+            const leverPick = e => {
+              const r = leverEl.getBoundingClientRect(), rows = NOTCH_MAX - NOTCH_MIN + 1;
+              const idx = Math.max(0, Math.min(rows - 1, Math.floor((e.clientY - r.top) / r.height * rows)));
+              const n = NOTCH_MAX - idx;
+              if (n !== sim.notch) setNotch(n);
+            };
+            leverEl.addEventListener("pointerdown", e => { leverEl.setPointerCapture(e.pointerId); leverPick(e); });
+            leverEl.addEventListener("pointermove", e => { if (e.buttons) leverPick(e); });
+          
+            const input = { openDoors: false, closeDoors: false };
+            let camMode = 0;
+            const doorBtn = () => { if (sim.doors === "open") input.closeDoors = true; else input.openDoors = true; };
+            const atoBtn = () => { sim.ato = !sim.ato; toast(sim.ato ? "ATO engaged - the train drives itself" : "ATO off"); };
+            $("bDoor").onclick = doorBtn; $("bATO").onclick = atoBtn;
+            $("bCam").onclick = () => camMode = (camMode + 1) % 3;
+            $("bHorn").onclick = horn;
+            addEventListener("keydown", e => {
+              const k = e.key.toLowerCase();
+              if (k === "w" || k === "arrowup" || k === "z") setNotch(sim.notch + 1);
+              else if (k === "s" || k === "arrowdown" || k === "a") setNotch(sim.notch - 1);
+              else if (k === "backspace") { e.preventDefault(); setNotch(-8); }
+              else if (k === "d") doorBtn(); else if (k === "o") atoBtn();
+              else if (k === "c") camMode = (camMode + 1) % 3; else if (k === "h") horn();
+            });
+            let toastT = 0;
+            function toast(m) { const t = $("toast"); t.textContent = m; t.style.opacity = 1; clearTimeout(toastT); toastT = setTimeout(() => t.style.opacity = 0, 2600); }
+          
+            // ---------- sound (WebAudio, generated) ----------
+            const AC = window.AudioContext || window.webkitAudioContext, ac = AC ? new AC() : null;
+            let motor, motorGain, rumbleGain;
+            if (ac) {
+              motor = ac.createOscillator(); motor.type = "sawtooth"; motorGain = ac.createGain(); motorGain.gain.value = 0;
+              const lp = ac.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 900;
+              motor.connect(lp).connect(motorGain).connect(ac.destination); motor.start();
+              const buf = ac.createBuffer(1, ac.sampleRate * 2, ac.sampleRate), d = buf.getChannelData(0);
+              for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+              const noise = ac.createBufferSource(); noise.buffer = buf; noise.loop = true;
+              const nf = ac.createBiquadFilter(); nf.type = "lowpass"; nf.frequency.value = 220;
+              rumbleGain = ac.createGain(); rumbleGain.gain.value = 0; noise.connect(nf).connect(rumbleGain).connect(ac.destination); noise.start();
+            }
+            function horn() {
+              if (!ac) return;
+              const g = ac.createGain(); g.gain.setValueAtTime(0.0001, ac.currentTime); g.gain.exponentialRampToValueAtTime(0.25, ac.currentTime + 0.05);
+              g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + 0.9); g.connect(ac.destination);
+              for (const f of [311, 370]) { const o = ac.createOscillator(); o.type = "square"; o.frequency.value = f; o.connect(g); o.start(); o.stop(ac.currentTime + 0.95); }
+            }
+          
+            // ---------- loop ----------
+            function resize() {
+              const dpr = Math.min(devicePixelRatio || 1, 2);
+              canvas.width = innerWidth * dpr; canvas.height = innerHeight * dpr;
+            }
+            addEventListener("resize", resize); resize();
+            let last = performance.now(), camLook = null;
+            const fmt = t => { t = ((t % 86400) + 86400) % 86400; return [t / 3600, t / 60 % 60, t % 60].map(x => String(Math.floor(x)).padStart(2, "0")).join(":"); };
+          
+            function frame(now) {
+              const dt = Math.min(0.05, (now - last) / 1000); last = now;
+              let notes = [];
+              for (let i = 0; i < 4; i++) notes = notes.concat(stepSim(route, sim, dt / 4, input));
+              input.openDoors = input.closeDoors = false;
+              if (notes.length) toast(notes[notes.length - 1]);
+          
+              // camera
+              const F = frameAt(tr, sim.s);
+              let eye, target;
+              if (camMode === 0) { eye = add(F.p, [0, 2.7, 0]); const T = frameAt(tr, sim.s + 60); target = add(T.p, [0, 2.2, 0]); }
+              else if (camMode === 1) { const B = frameAt(tr, sim.s - 35); eye = add(add(B.p, scl(B.r, 9)), [0, 9, 0]); target = add(F.p, [0, 1.5, 0]); }
+              else { const G = frameAt(tr, sim.s + 30); eye = add(add(G.p, scl(G.r, -14)), [0, 1.7 - G.ht, 0]); target = add(F.p, [0, 2, 0]); }
+              camLook = camLook ? add(scl(camLook, 0.85), scl(target, 0.15)) : target;
+              const proj = M.persp(camMode === 0 ? 1.0 : 0.9, canvas.width / canvas.height, 0.3, 4000);
+              const view = M.look(eye, camLook, [0, 1, 0]), vp = M.mul(proj, view);
+          
+              gl.viewport(0, 0, canvas.width, canvas.height);
+              gl.clearColor(...fog, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+              gl.enable(gl.DEPTH_TEST); gl.enable(gl.CULL_FACE);
+              // sky
+              gl.depthMask(false); gl.useProgram(sky.p);
+              gl.uniformMatrix4fv(sky.u.uInvVP, false, M.inv(vp)); gl.uniform3fv(sky.u.uSun, sun); gl.uniform3fv(sky.u.uFog, fog);
+              gl.bindVertexArray(skyVAO); gl.drawArrays(gl.TRIANGLES, 0, 3); gl.depthMask(true);
+              // world
+              gl.useProgram(prog.p);
+              const U = prog.u;
+              gl.uniformMatrix4fv(U.uVP, false, vp); gl.uniform3fv(U.uSun, sun); gl.uniform3fv(U.uEye, eye); gl.uniform3fv(U.uFog, fog);
+              gl.uniform1f(U.uFogD, 1400); gl.uniform4f(U.uTint, 0, 0, 0, 0); gl.uniform1i(U.uTex, 0);
+              // ground (slightly below the local ground level)
+              const gm = M.ident(); gm[12] = Math.round(eye[0] / 50) * 50; gm[13] = F.p[1] - F.ht - 0.05; gm[14] = Math.round(eye[2] / 50) * 50;
+              gl.uniformMatrix4fv(U.uModel, false, gm); gl.uniform1i(U.uMode, 1);
+              gl.bindVertexArray(ground.vao); gl.drawElements(gl.TRIANGLES, ground.n, gl.UNSIGNED_INT, 0);
+              gl.uniformMatrix4fv(U.uModel, false, M.ident()); gl.uniform1i(U.uMode, 0);
+              const kc = Math.floor(sim.s / CHUNK);
+              for (let k = kc - 1; k <= kc + 6; k++) { if (k < 0) continue; const c = chunk(k); if (c) { gl.bindVertexArray(c.vao); gl.drawElements(gl.TRIANGLES, c.n, gl.UNSIGNED_INT, 0); } }
+              for (const [k, c] of chunks) if ((k < kc - 2 || k > kc + 8) && c) { gl.deleteVertexArray(c.vao); c.bufs.forEach(b => gl.deleteBuffer(b)); chunks.delete(k); }
+              // signs
+              gl.uniform1i(U.uMode, 2); gl.disable(gl.CULL_FACE);
+              route.stations.forEach((st, i) => { if (Math.abs(st.stop - sim.s) < 1500 && signs[i].mesh) {
+                gl.bindTexture(gl.TEXTURE_2D, signs[i].tex); gl.bindVertexArray(signs[i].mesh.vao); gl.drawElements(gl.TRIANGLES, signs[i].mesh.n, gl.UNSIGNED_INT, 0); } });
+              gl.enable(gl.CULL_FACE); gl.uniform1i(U.uMode, 0);
+              // signal lamps
+              gl.bindVertexArray(lamp.vao);
+              for (const sig of route.signals) if (sig.s > sim.s - 50 && sig.s - sim.s < 1500) {
+                const S = frameAt(tr, sig.s), c = add(add(S.p, scl(S.r, -2.3)), [0, 3.85, 0]);
+                const red = signalRed(route, sim, sig);
+                const m = M.ident(); m[0] = m[5] = m[10] = 0.26; m[12] = c[0] - S.f[0] * 0.16; m[13] = red ? c[1] - 0.3 : c[1] + 0.2; m[14] = c[2] - S.f[2] * 0.16;
+                gl.uniformMatrix4fv(U.uModel, false, m);
+                gl.uniform4f(U.uTint, red ? 1 : 0.1, red ? 0.08 : 1, red ? 0.05 : 0.35, 1);
+                gl.drawElements(gl.TRIANGLES, lamp.n, gl.UNSIGNED_INT, 0);
+              }
+              gl.uniform4f(U.uTint, 0, 0, 0, 0);
+              // the train itself (hidden in the cab view)
+              if (camMode !== 0) for (let i = 0; i < NCARS; i++) {
+                const sc = sim.s - CAR / 2 - i * (CAR + GAP);
+                gl.uniformMatrix4fv(U.uModel, false, modelAt(sc));
+                const mesh = i === 0 ? carLead : carMid;
+                gl.bindVertexArray(mesh.vao); gl.drawElements(gl.TRIANGLES, mesh.n, gl.UNSIGNED_INT, 0);
+              }
+              gl.uniformMatrix4fv(U.uModel, false, M.ident());
+          
+              // HUD
+              const kmh = sim.v * 3.6, lim = limitAt(route, sim.s);
+              $("spd").innerHTML = `<div>${Math.round(kmh)}<span>km/h</span></div>`;
+              $("arc").setAttribute("stroke-dasharray", `${Math.min(292, kmh / 120 * 292)} 400`);
+              $("arc").setAttribute("stroke", sim.atp ? "#ffb000" : "#fff");
+              $("lim").setAttribute("stroke-dasharray", lim < 900 ? `0 ${Math.max(0, Math.min(292, lim / 120 * 292) - 1.5)} 3 400` : "0 400");
+              const shown = sim.doors !== "closed" ? Math.min(sim.notch, -4) : sim.atp ? Math.min(sim.notch, -7) : sim.ebLatch ? -8 : sim.notch;
+              $("notch").textContent = notchName(shown);
+              leverEl.querySelectorAll(".st").forEach(d => d.classList.toggle("on", +d.dataset.n === sim.notch));
+              $("clock").textContent = fmt(sim.time);
+              $("limit").textContent = lim < 900 ? lim + " km/h" : "—";
+              $("score").textContent = sim.score;
+              $("lATO").classList.toggle("on", sim.ato); $("lATP").classList.toggle("on", sim.atp);
+              $("lDoor").classList.toggle("on", sim.doors !== "closed"); $("lSPAD").classList.toggle("on", sim.spad);
+              const ni = nextStation(route, sim);
+              if (sim.doors === "open") {
+                const st = route.stations[sim.stIndex];
+                const wait = st && st.dep !== null ? Math.max(0, Math.ceil(st.dep - sim.time)) : 0;
+                $("nextName").textContent = st ? st.name : "—";
+                $("nextInfo").textContent = wait > 0 ? `Doors open · depart in ${wait}s` : (sim.doorTimer > 15 ? "Ready · press Doors to close" : "Doors open · boarding");
+              } else if (ni >= 0) {
+                const st = route.stations[ni], d = st.stop - sim.s;
+                $("nextName").textContent = st.name;
+                $("nextInfo").textContent = `${d > 1000 ? (d / 1000).toFixed(2) + " km" : d.toFixed(1) + " m"}${st.arr !== null ? " · due " + fmt(st.arr).slice(0, 5) : ""} · doors ${st.side > 0 ? "right" : "left"}`;
+              } else { $("nextName").textContent = "End of line"; $("nextInfo").textContent = `Final score ${sim.score}`; }
+          
+              if (ac) {
+                const pw = shown > 0 ? shown / 4 : shown < 0 && sim.v > 0.5 ? 0.25 : 0;
+                motor.frequency.setTargetAtTime(40 + sim.v * 14, ac.currentTime, 0.1);
+                motorGain.gain.setTargetAtTime(Math.min(0.06, pw * 0.07) * Math.min(1, sim.v / 2 + 0.2), ac.currentTime, 0.1);
+                rumbleGain.gain.setTargetAtTime(Math.min(0.25, sim.v / 25 * 0.25), ac.currentTime, 0.2);
+              }
+              requestAnimationFrame(frame);
+            }
+            if (ac && ac.state === "suspended") ac.resume();
+            document.getElementById("start").style.display = "none";
+            toast(route.stations.length ? `${route.stations[0].name} · doors open. Close the doors when it's time to go.` : "Ready");
+            requestAnimationFrame(frame);
+          }
+          
+          document.getElementById("go").onclick = () => startApp(DEMO_ROUTE);
+          document.getElementById("file").onchange = async e => {
+            const f = e.target.files[0]; if (!f) return;
+            const buf = await f.arrayBuffer();
+            let text;
+            try { text = new TextDecoder("utf-8", { fatal: true }).decode(buf); }
+            catch { try { text = new TextDecoder("shift_jis").decode(buf); } catch { text = new TextDecoder("latin1").decode(buf); } }
+            startApp(text);
+          };
+          </script>
+          </body>
+          </html>
+          HTML_EOF
+
+      - name: Signing key (made once, then reused so updates install over the old app)
+        run: |
+          if [ ! -f openrail.keystore ]; then
+            keytool -genkeypair -keystore openrail.keystore -alias openrail -keyalg RSA -keysize 2048 \
+              -validity 10000 -storepass openrail -keypass openrail -dname "CN=OpenRail"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add openrail.keystore
+            git commit -m "Add app signing key"
+            git push || echo "::warning::Could not save the signing key to the repo"
+          fi
+
+      - name: Build APK
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          BT="$SDK/build-tools/$(ls "$SDK/build-tools" | sort -V | tail -1)"
+          PLAT="$(ls "$SDK/platforms" | grep -E '^android-[0-9]+$' | sort -V | tail -1)"
+          JAR="$SDK/platforms/$PLAT/android.jar"
+          TARGET="${PLAT#android-}"
+          echo "Build tools: $BT  Platform: $PLAT"
+          cd app
+          mkdir -p build/compiled build/classes
+          "$BT/aapt2" compile res/drawable/ic_launcher.xml -o build/compiled/
+          "$BT/aapt2" link -o build/unsigned.apk -I "$JAR" --manifest AndroidManifest.xml -A assets \
+            build/compiled/*.flat --min-sdk-version 24 --target-sdk-version "$TARGET" \
+            --version-code ${{ github.run_number }} --version-name "1.0.${{ github.run_number }}"
+          javac -Xlint:-options -source 8 -target 8 -bootclasspath "$JAR" -d build/classes \
+            src/sg/openrail/app/MainActivity.java
+          "$BT/d8" --lib "$JAR" --min-api 24 --output build build/classes/sg/openrail/app/*.class
+          (cd build && zip -q unsigned.apk classes.dex)
+          "$BT/zipalign" -f -p 4 build/unsigned.apk build/aligned.apk
+          "$BT/apksigner" sign --ks ../openrail.keystore --ks-pass pass:openrail --key-pass pass:openrail \
+            --out ../OpenRail.apk build/aligned.apk
+          "$BT/apksigner" verify ../OpenRail.apk
+          ls -l ../OpenRail.apk
+
+      - name: Publish to Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: OpenRail 1.0.${{ github.run_number }}
+          body: Install OpenRail.apk on your phone.
+          files: OpenRail.apk
