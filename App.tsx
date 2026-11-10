@@ -23,7 +23,36 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
 
-  useEffect(() => { invoke("detect_openbve").then(setInstallation).catch(() => {}); }, []);
+  useEffect(() => {
+    const savedExe = localStorage.getItem("openrail.openbveExecutable");
+    const savedRoot = localStorage.getItem("openrail.contentRoot");
+    if (savedExe) setInstallation({ found: true, executable: savedExe });
+    if (savedRoot) setContentRoot(savedRoot);
+    invoke("detect_openbve").then((detected: any) => {
+      if (detected?.found && detected.executable && !savedExe) setInstallation(detected);
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (installation.executable) localStorage.setItem("openrail.openbveExecutable", installation.executable);
+  }, [installation.executable]);
+
+  useEffect(() => {
+    if (contentRoot) localStorage.setItem("openrail.contentRoot", contentRoot);
+  }, [contentRoot]);
+
+  async function chooseExecutable() {
+    const dialog = await import("@tauri-apps/plugin-dialog");
+    const picked = await dialog.open({
+      multiple: false,
+      title: "Select OpenBVE executable",
+      filters: [{ name: "OpenBVE executable", extensions: ["exe", "app", "bin"] }]
+    });
+    if (typeof picked === "string") {
+      setInstallation({ found: true, executable: picked });
+      setMessage("OpenBVE executable saved.");
+    }
+  }
 
   async function chooseContent() {
     const dialog = await import("@tauri-apps/plugin-dialog");
@@ -65,7 +94,7 @@ export default function App() {
       {page === "Content" && <Content scan={scan} root={contentRoot} onChoose={chooseContent} busy={busy} />}
       {page === "GitHub" && <Simple title="GitHub Content" text="Repository and release installation will be connected next. The package system will validate content before installation." />}
       {page === "Validator" && <Validator scan={scan} />}
-      {page === "Settings" && <Settings installation={installation} root={contentRoot} onChoose={chooseContent} onDetect={()=>invoke("detect_openbve").then(setInstallation)} />}
+      {page === "Settings" && <Settings installation={installation} root={contentRoot} onChoose={chooseContent} onChooseExecutable={chooseExecutable} onDetect={()=>invoke("detect_openbve").then(setInstallation)} />}
     </main>
   </div>;
 }
@@ -78,7 +107,7 @@ function Home({stats, scan, installation, onScan, onPlay, route, train}:{stats:a
 function Library({title,items,selected,onSelect,empty}:{title:string;items:Item[];selected:Item|null;onSelect:(x:Item)=>void;empty:string}) { return <section className="content"><div className="library-head"><div><div className="eyebrow">CONTENT LIBRARY</div><h2>{title}</h2></div><span>{items.length} detected</span></div>{items.length===0?<div className="panel empty large">{empty}</div>:<div className="cards">{items.map((x,i)=><button className={selected?.path===x.path?"card selected":"card"} key={x.path+i} onClick={()=>onSelect(x)}><div className="cover">{x.kind==="train"?"🚇":"🛤️"}</div><div><b>{x.name}</b><small>{x.path}</small><small>{x.files} files</small></div></button>)}</div>}</section> }
 function Content({scan,root,onChoose,busy}:{scan:ScanResult;root:string;onChoose:()=>void;busy:boolean}) { return <section className="content"><div className="panel large"><PanelTitle t="CONTENT SCANNER"/><h2>{busy?"Scanning…":"OpenBVE content"}</h2><p>{root || "No folder selected."}</p><button className="secondary" onClick={onChoose}>CHOOSE FOLDER</button><div className="scanline"><span>Routes</span><b>{scan.routes.length}</b><span>Trains</span><b>{scan.trains.length}</b><span>Files</span><b>{scan.files_scanned}</b></div></div></section> }
 function Validator({scan}:{scan:ScanResult}) { return <section className="content"><div className="panel large"><PanelTitle t="VALIDATOR"/><h2>{scan.warnings.length?`${scan.warnings.length} warnings`:`No scanner warnings`}</h2>{scan.warnings.length?<ul>{scan.warnings.map((x,i)=><li key={i}>{x}</li>)}</ul>:<p>Run a content scan to populate validation diagnostics. Full route-reference validation is the next parser milestone.</p>}</div></section> }
-function Settings({installation,root,onChoose,onDetect}:{installation:any;root:string;onChoose:()=>void;onDetect:()=>void}) { return <section className="content"><div className="panel large"><PanelTitle t="SETTINGS"/><div className="setting"><b>OpenBVE executable</b><span>{installation.executable ?? "Not detected"}</span><button className="secondary" onClick={onDetect}>RESCAN</button></div><div className="setting"><b>Content directory</b><span>{root || "Not selected"}</span><button className="secondary" onClick={onChoose}>CHOOSE</button></div><div className="setting"><b>Upscaling</b><span>Native — DLSS requires engine-side renderer integration.</span></div></div></section> }
+function Settings({installation,root,onChoose,onChooseExecutable,onDetect}:{installation:any;root:string;onChoose:()=>void;onChooseExecutable:()=>void;onDetect:()=>void}) { return <section className="content"><div className="panel large"><PanelTitle t="SETTINGS"/><div className="setting"><b>OpenBVE executable</b><span>{installation.executable ?? "Not detected"}</span><div className="setting-actions"><button className="secondary" onClick={onDetect}>RESCAN</button><button className="secondary" onClick={onChooseExecutable}>BROWSE</button></div></div><div className="setting"><b>Content directory</b><span>{root || "Not selected"}</span><button className="secondary" onClick={onChoose}>CHOOSE</button></div><div className="setting"><b>Upscaling</b><span>Native — DLSS requires engine-side renderer integration.</span></div></div></section> }
 function Simple({title,text}:{title:string;text:string}) { return <section className="content"><div className="panel large"><PanelTitle t="OPENRAIL"/><h2>{title}</h2><p>{text}</p></div></section> }
 function Stat({n,t}:{n:number;t:string}){return <div className="stat"><span>{t}</span><b>{n}</b></div>}
 function PanelTitle({t}:{t:string}){return <div className="panel-title">{t}</div>}

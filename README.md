@@ -1,22 +1,28 @@
 # OpenRail
 
-OpenRail is a from-scratch, OMSI-inspired launcher and content manager for OpenBVE.
+OpenRail is an open-source desktop launcher and content manager for OpenBVE.
 
-## v0.2
+## v1.0 foundation
 
-- Real Tauri/Rust command boundary
+- Modern launcher UI
 - OpenBVE executable detection
-- Recursive content scanner for common route/train markers
-- Route and train library views
-- Folder selection through the native dialog
-- Launch selected OpenBVE route/train
-- Validator foundation
-- Rendering roadmap with a strict rule: never claim DLSS is active unless the engine actually uses it
+- Manual executable selection
+- Recursive route/train scanner
+- Route and train library
+- Real OpenBVE launch command
+- Basic validator/warning surface
+- Native folder/file dialogs
+- Rendering roadmap with DLSS kept disabled until engine-side integration is real
 
-## Architecture
+## Development
 
-The launcher is intentionally separated from the future renderer work. DLSS/FSR/XeSS integration belongs in an engine-side rendering layer, not a fake launcher setting.
+```bash
+npm install
+npm run dev
+```
 
-## Build
+For a Tauri desktop build, install the Tauri prerequisites for your platform and run the standard Tauri CLI workflow.
 
-Install Node.js and Rust/Tauri prerequisites, then run `npm install` and `npm run build` for the web UI. For the desktop application use the Tauri CLI (`tauri dev` / `tauri build`).
+## Design principle
+
+OpenRail does not pretend to provide DLSS. DLSS/FSR/XeSS support will only be exposed once the actual OpenBVE rendering path has a compatible integration.
