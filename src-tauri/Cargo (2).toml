@@ -1,0 +1,23 @@
+[package]
+name = "openrail-launcher"
+version = "1.1.0"
+description = "OpenRail — modern OpenBVE launcher and content manager"
+authors = ["OpenRail contributors"]
+edition = "2021"
+
+[lib]
+name = "openrail_launcher_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2" }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+tauri = { version = "2" }
+tauri-plugin-dialog = "2"
+encoding_rs = "0.8"
+base64 = "0.22"
+
+# Stops Cargo looking in parent folders for another Cargo.toml
+[workspace]
