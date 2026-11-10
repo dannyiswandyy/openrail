@@ -1,0 +1,17 @@
+[package]
+name = "openbve-launcher"
+version = "0.1.0"
+description = "OpenBVE launcher and content manager"
+authors = ["OpenBVE Launcher contributors"]
+edition = "2021"
+
+[lib]
+name = "openbve_launcher_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+tauri = { version = "2" }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-build = "2"
