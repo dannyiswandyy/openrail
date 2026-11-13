@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: openrail-main-build
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
