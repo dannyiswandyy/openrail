@@ -8,7 +8,9 @@ type RouteItem = {
   stations: string[]; lengthKm: number | null; image: string | null; format: string;
 };
 type TrainItem = { name: string; path: string; group: string; comment: string; image: string | null };
-type ScanResult = { routes: RouteItem[]; trains: TrainItem[]; filesScanned: number; warnings: string[] };\ntype ValidationIssue = { severity: string; code: string; message: string; path: string };\ntype ValidationReport = { route: string; checkedFiles: number; missingFiles: number; issues: ValidationIssue[] };
+type ScanResult = { routes: RouteItem[]; trains: TrainItem[]; filesScanned: number; warnings: string[] };
+type ValidationIssue = { severity: string; code: string; message: string; path: string };
+type ValidationReport = { route: string; checkedFiles: number; missingFiles: number; issues: ValidationIssue[] };
 type Installation = { found: boolean; executable: string | null; contentHints: string[] };
 type Recent = { route: string; train: string | null; at: number };
 type LaunchPrefs = { ai: boolean; fullscreen: boolean; width: number; height: number };
@@ -75,7 +77,9 @@ export default function App() {
   const [favourites, setFavourites] = useState<string[]>(() => load("openrail.favourites", []));
   const [recent, setRecent] = useState<Recent[]>(() => load("openrail.recent", []));
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");\n  const [validation, setValidation] = useState<ValidationReport | null>(null);\n  const [validating, setValidating] = useState(false);
+  const [message, setMessage] = useState("");
+  const [validation, setValidation] = useState<ValidationReport | null>(null);
+  const [validating, setValidating] = useState(false);
   const toastTimer = useRef<number | undefined>(undefined);
 
   const route = scan.routes.find(r => r.path === routePath) ?? null;
@@ -124,7 +128,18 @@ export default function App() {
     }
   }
 
-  async function validateSelected() {\n    if (!route) { notify("Pick a route first."); setPage("Routes"); return; }\n    setValidating(true);\n    try {\n      const report = await call<ValidationReport>("validate_route_command", { route });\n      setValidation(report);\n      setPage("Validator");\n      notify(report.missingFiles ? `Validator found ${report.missingFiles} missing reference${report.missingFiles === 1 ? "" : "s"}.` : "Route validation passed.");\n    } catch (e) { notify(errorText(e)); } finally { setValidating(false); }\n  }\n\n  async function addFolder() {
+  async function validateSelected() {
+    if (!route) { notify("Pick a route first."); setPage("Routes"); return; }
+    setValidating(true);
+    try {
+      const report = await call<ValidationReport>("validate_route_command", { route });
+      setValidation(report);
+      setPage("Validator");
+      notify(report.missingFiles ? `Validator found ${report.missingFiles} missing reference${report.missingFiles === 1 ? "" : "s"}.` : "Route validation passed.");
+    } catch (e) { notify(errorText(e)); } finally { setValidating(false); }
+  }
+
+  async function addFolder() {
     const picked = await call<string | null>("pick_folder", { title: "Select an OpenBVE content folder" }).catch(e => { notify(errorText(e)); return null; });
     if (!picked) return;
     if (roots.includes(picked)) { notify("That folder is already in your library."); return; }
