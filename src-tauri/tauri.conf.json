@@ -34,7 +34,7 @@
       "icons/128x128@2x.png",
       "icons/icon.ico"
     ],
-    "category": "Simulation",
+    "category": "Simulation Game",
     "shortDescription": "Independent OpenBVE-compatible railway simulation platform"
   }
 }
