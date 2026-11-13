@@ -10,15 +10,19 @@ on:
 permissions:
   contents: read
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   web:
     name: Web build
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
+          package-manager-cache: false
       - run: npm install
       - run: npm run build
 
@@ -26,7 +30,7 @@ jobs:
     name: Rust tests
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install Tauri Linux dependencies
         run: |
           sudo apt-get update
@@ -38,10 +42,11 @@ jobs:
     name: Windows OpenRail EXE
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
+          package-manager-cache: false
       - uses: dtolnay/rust-toolchain@stable
       - run: npm install
       - name: Build NSIS installer
