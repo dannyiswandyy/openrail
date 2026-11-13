@@ -37,7 +37,7 @@ jobs:
           package-manager-cache: false
       - run: npm install
       - name: Generate Tauri icons
-        run: npm run tauri -- icon src-tauri/icons/app-icon.svg -o src-tauri/icons
+        run: npm run tauri -- icon src-tauri/icons/app-icon.svg
       - uses: dtolnay/rust-toolchain@stable
       - name: Install Tauri Linux dependencies
         run: |
@@ -57,7 +57,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: npm install
       - name: Generate Tauri icons
-        run: npm run tauri -- icon src-tauri/icons/app-icon.svg -o src-tauri/icons
+        run: npm run tauri -- icon src-tauri/icons/app-icon.svg
       - name: Build NSIS installer
         run: npm run tauri build -- --bundles nsis
       - name: Verify installer
