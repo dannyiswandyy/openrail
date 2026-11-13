@@ -23,11 +23,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - run: npm ci
+      - run: npm install
       - run: npm run build
       - run: cargo test --manifest-path src-tauri/Cargo.toml
 
@@ -45,7 +44,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - run: npm ci
+      - run: npm install
 
       - name: Build OpenRail Windows installer
         run: npm run tauri build -- --bundles nsis
