@@ -15,7 +15,7 @@ pub fn run() {
             pick_folder,
             pick_executable,
             launch_openbve,
-            validate_route
+            validate_route_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running OpenRail");
