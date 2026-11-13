@@ -15,7 +15,7 @@ const IMAGE_EXTENSIONS: [&str; 5] = ["png", "jpg", "jpeg", "bmp", "gif"];
 const MAX_TEXT_BYTES: u64 = 768 * 1024;
 const MAX_WARNINGS: usize = 400;
 
-#[derive(Debug, Serialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, serde::Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RouteItem {
     pub name: String,
