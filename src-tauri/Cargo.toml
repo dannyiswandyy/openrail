@@ -1,23 +1,19 @@
 [package]
-name = "openrail-launcher"
-version = "1.1.0"
-description = "OpenRail — modern OpenBVE launcher and content manager"
-authors = ["OpenRail contributors"]
+name = "openrail"
+version = "0.1.0"
+description = "OpenRail independent OpenBVE-compatible railway platform"
+authors = ["Danny Iswandyy"]
 edition = "2021"
 
 [lib]
-name = "openrail_launcher_lib"
+name = "openrail_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2" }
+tauri-build = { version = "2.5.0" }
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-tauri = { version = "2" }
-tauri-plugin-dialog = "2"
-encoding_rs = "0.8"
-base64 = "0.22"
-
-# Stops Cargo looking in parent folders for another Cargo.toml
-[workspace]
+tauri = { version = "2.9.0" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+walkdir = "2.5"
