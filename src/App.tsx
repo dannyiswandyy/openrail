@@ -9,8 +9,6 @@ type RouteItem = {
 };
 type TrainItem = { name: string; path: string; group: string; comment: string; image: string | null };
 type ScanResult = { routes: RouteItem[]; trains: TrainItem[]; filesScanned: number; warnings: string[] };
-type ValidationIssue = { severity: string; code: string; message: string; path: string };
-type ValidationReport = { route: string; checkedFiles: number; missingFiles: number; issues: ValidationIssue[] };
 type Installation = { found: boolean; executable: string | null; contentHints: string[] };
 type Recent = { route: string; train: string | null; at: number };
 type LaunchPrefs = { ai: boolean; fullscreen: boolean; width: number; height: number };
@@ -78,8 +76,6 @@ export default function App() {
   const [recent, setRecent] = useState<Recent[]>(() => load("openrail.recent", []));
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const [validation, setValidation] = useState<ValidationReport | null>(null);
-  const [validating, setValidating] = useState(false);
   const toastTimer = useRef<number | undefined>(undefined);
 
   const route = scan.routes.find(r => r.path === routePath) ?? null;
@@ -126,17 +122,6 @@ export default function App() {
     } finally {
       setBusy(false);
     }
-  }
-
-  async function validateSelected() {
-    if (!route) { notify("Pick a route first."); setPage("Routes"); return; }
-    setValidating(true);
-    try {
-      const report = await call<ValidationReport>("validate_route_command", { route });
-      setValidation(report);
-      setPage("Validator");
-      notify(report.missingFiles ? `Validator found ${report.missingFiles} missing reference${report.missingFiles === 1 ? "" : "s"}.` : "Route validation passed.");
-    } catch (e) { notify(errorText(e)); } finally { setValidating(false); }
   }
 
   async function addFolder() {
@@ -227,7 +212,7 @@ export default function App() {
         fallback="🚇" />}
       {page === "Content" && <Content scan={scan} roots={roots} busy={busy} onAdd={addFolder} onRemove={removeFolder} onRescan={() => runScan()} />}
       {page === "GitHub" && <Simple title="GitHub Content" text="Installing routes and trains straight from GitHub releases is planned. Packages will be checked by the validator before they are installed." />}
-      {page === "Validator" && <Validator scan={scan} selected={route} report={validation} validating={validating} onValidate={validateSelected} onSelect={x => setRoutePath(x.path)} />}
+      {page === "Validator" && <Validator scan={scan} />}
       {page === "Settings" && <Settings executable={executable} prefs={prefs} setPrefs={setPrefs}
         onDetect={detect} onBrowse={chooseExecutable} roots={roots} onAdd={addFolder} onRemove={removeFolder} />}
     </main>
@@ -362,17 +347,35 @@ function Content(p: { scan: ScanResult; roots: string[]; busy: boolean; onAdd: (
   </div></section>;
 }
 
-function Validator(p: { scan: ScanResult; selected: RouteItem | null; report: ValidationReport | null; validating: boolean; onValidate: () => void; onSelect: (x: RouteItem) => void }) {
+function Validator({ scan }: { scan: ScanResult }) {
   return <section className="content"><div className="panel large"><PanelTitle t="VALIDATOR" />
-    <div className="validator-head"><div><h2>{p.report ? (p.report.missingFiles ? `${p.report.missingFiles} missing references` : "Route looks healthy") : "Content health"}</h2>
-      <p className="muted">Phase 1 validator checks explicit file-like references without changing your OpenBVE files.</p></div>
-      <div className="validator-actions"><select value={p.selected?.path ?? ""} onChange={e => { const x=p.scan.routes.find(r=>r.path===e.target.value); if(x) p.onSelect(x); }}>
-        <option value="">Choose a route…</option>{p.scan.routes.map(r=><option key={r.path} value={r.path}>{r.name}</option>)}</select>
-        <button className="secondary" onClick={p.onValidate} disabled={!p.selected || p.validating}>{p.validating ? "CHECKING…" : "VALIDATE ROUTE"}</button></div></div>
-    {p.report ? <div className="validation-summary"><b>{p.report.checkedFiles}</b><span>references checked</span><b>{p.report.missingFiles}</b><span>missing</span></div> : null}
-    {p.report?.issues?.length ? <div className="issues">{p.report.issues.map((x,i)=><div className={x.severity==="ok" ? "issue ok" : "issue"} key={i}><b>{x.code}</b><span>{x.message}</span></div>)}</div>
-      : !p.scan.warnings.length ? <div className="empty large">Select a route and run the validator.</div>
-      : <div className="issues">{p.scan.warnings.map((x,i)=><div className="issue" key={i}><b>SCAN</b><span>{x}</span></div>)}</div>}
+    <h2>{scan.warnings.length ? `${scan.warnings.length} warning${scan.warnings.length === 1 ? "" : "s"}` : "No scanner warnings"}</h2>
+    {scan.warnings.length ? <ul>{scan.warnings.map((x, i) => <li key={i}>{x}</li>)}</ul>
+      : <p className="muted">Scan your content to check it. Checking that every object a route uses actually exists is the next milestone.</p>}
   </div></section>;
 }
 
+function Settings(p: {
+  executable: string | null; prefs: LaunchPrefs; setPrefs: (p: LaunchPrefs) => void; onDetect: () => void; onBrowse: () => void;
+  roots: string[]; onAdd: () => void; onRemove: (f: string) => void;
+}) {
+  const { prefs } = p;
+  const num = (v: string) => Math.max(0, Math.min(16384, parseInt(v, 10) || 0));
+  return <section className="content"><div className="panel large"><PanelTitle t="SETTINGS" />
+    <div className="setting"><b>OpenBVE program</b><span>{p.executable ?? "Not found yet"}</span>
+      <div className="setting-actions"><button className="secondary" onClick={p.onDetect}>FIND</button><button className="secondary" onClick={p.onBrowse}>BROWSE</button></div></div>
+    <div className="setting top"><b>Content folders</b><Folders roots={p.roots} onAdd={p.onAdd} onRemove={p.onRemove} /><span /></div>
+    <div className="setting"><b>Window size</b>
+      <div className="res"><input type="number" value={prefs.width || ""} onChange={e => p.setPrefs({ ...prefs, width: num(e.target.value) })} placeholder="Width" />
+        <span>×</span><input type="number" value={prefs.height || ""} onChange={e => p.setPrefs({ ...prefs, height: num(e.target.value) })} placeholder="Height" /></div>
+      <div className="setting-actions">
+        <label className="check"><input type="checkbox" checked={prefs.fullscreen} onChange={e => p.setPrefs({ ...prefs, fullscreen: e.target.checked })} />Full screen</label></div></div>
+    <div className="setting"><b>Upscaling</b><span>Native — DLSS needs renderer work inside OpenBVE itself.</span><span /></div>
+  </div></section>;
+}
+
+function Simple({ title, text }: { title: string; text: string }) { return <section className="content"><div className="panel large"><PanelTitle t="OPENRAIL" /><h2>{title}</h2><p className="muted">{text}</p></div></section>; }
+function Stat({ n, t }: { n: number; t: string }) { return <div className="stat"><span>{t}</span><b>{n}</b></div>; }
+function PanelTitle({ t }: { t: string }) { return <div className="panel-title">{t}</div>; }
+function Road({ label, state }: { label: string; state: string }) { return <div className="road"><span>{label}</span><small>{state}</small></div>; }
+function icon(x: Page) { return ({ Home: "⌂", Routes: "▱", Trains: "▣", Content: "◈", GitHub: "◉", Validator: "✓", Settings: "⚙" } as Record<Page, string>)[x]; }
